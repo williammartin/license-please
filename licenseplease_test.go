@@ -115,32 +115,67 @@ func TestRecursiveLicenseFinder_Find_ContextCancellation(t *testing.T) {
 	}
 }
 
-func TestClassifyType(t *testing.T) {
+func TestLicenseTypeFromSPDX(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name     string
-		license  string
-		expected string
+		spdx     string
+		wantSPDX string
 	}{
-		{"MIT", "MIT", "permissive"},
-		{"Apache-2.0", "Apache-2.0", "permissive"},
-		{"BSD-3-Clause", "BSD-3-Clause", "permissive"},
-		{"ISC", "ISC", "permissive"},
-		{"GPL-3.0", "GPL-3.0", "copyleft"},
-		{"LGPL-2.1", "LGPL-2.1", "copyleft"},
-		{"AGPL-3.0", "AGPL-3.0", "copyleft"},
-		{"MPL-2.0", "MPL-2.0", "weak-copyleft"},
-		{"Unknown", "Proprietary", "unknown"},
-		{"Empty", "", "unknown"},
+		{"MIT", "MIT", "MIT"},
+		{"Apache-2.0", "Apache-2.0", "Apache-2.0"},
+		{"BSD-3-Clause", "BSD-3-Clause", "BSD-3-Clause"},
+		{"BSD-2-Clause", "BSD-2-Clause", "BSD-2-Clause"},
+		{"ISC", "ISC", "ISC"},
+		{"MPL-2.0", "MPL-2.0", "MPL-2.0"},
+		{"Unlicense", "Unlicense", "Unlicense"},
+		{"Unknown", "Proprietary", "Proprietary"},
+		{"Empty", "", ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := classifyType(tt.license)
-			if result != tt.expected {
-				t.Errorf("classifyType(%q) = %q, want %q", tt.license, result, tt.expected)
+			result := LicenseTypeFromSPDX(tt.spdx)
+			if result.SPDX() != tt.wantSPDX {
+				t.Errorf("LicenseTypeFromSPDX(%q).SPDX() = %q, want %q", tt.spdx, result.SPDX(), tt.wantSPDX)
+			}
+		})
+	}
+}
+
+func TestLicenseTypeCollectArtifacts(t *testing.T) {
+	t.Parallel()
+
+	// Create a temp dir with a NOTICE file for Apache testing
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "NOTICE"), []byte("Notice content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		license       LicenseType
+		wantArtifacts []string
+	}{
+		{MIT{}, []string{"LICENSE"}},
+		{Apache2{}, []string{"LICENSE", "NOTICE"}}, // Apache collects NOTICE if present
+		{BSD2Clause{}, []string{"LICENSE"}},
+		{BSD3Clause{}, []string{"LICENSE"}},
+		{ISC{}, []string{"LICENSE"}},
+		{MPL2{}, []string{"LICENSE"}},
+		{Unlicense{}, []string{"LICENSE"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.license.SPDX(), func(t *testing.T) {
+			t.Parallel()
+			got, err := tt.license.CollectArtifacts(tmpDir, "LICENSE")
+			if err != nil {
+				t.Fatalf("CollectArtifacts() error = %v", err)
+			}
+			if len(got) != len(tt.wantArtifacts) {
+				t.Errorf("%s.CollectArtifacts() = %v, want %v", tt.license.SPDX(), got, tt.wantArtifacts)
 			}
 		})
 	}
@@ -194,9 +229,9 @@ func TestAggregator_Aggregate(t *testing.T) {
 	}
 
 	classifierLicenses := map[string][]License{
-		"/tmp/mod/foo/bar/LICENSE":           {{Name: "MIT", Type: "permissive"}},
-		"/tmp/mod/baz/qux/LICENSE":           {{Name: "Apache-2.0", Type: "permissive"}},
-		"/tmp/mod/baz/qux/third_party/COPYING": {{Name: "BSD-3-Clause", Type: "permissive"}},
+		"/tmp/mod/foo/bar/LICENSE":             {{Name: "MIT", Type: MIT{}}},
+		"/tmp/mod/baz/qux/LICENSE":             {{Name: "Apache-2.0", Type: Apache2{}}},
+		"/tmp/mod/baz/qux/third_party/COPYING": {{Name: "BSD-3-Clause", Type: BSD3Clause{}}},
 	}
 
 	aggregator := &Aggregator{

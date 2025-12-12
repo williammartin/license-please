@@ -177,30 +177,34 @@ func TestE2E_LicenseTypes(t *testing.T) {
 		t.Fatalf("Aggregate() error = %v", err)
 	}
 
-	// Collect license types
-	typeCount := make(map[string]int)
+	// Collect license types by SPDX
+	spdxCount := make(map[string]int)
 	for _, lf := range licenseFiles {
 		for _, lic := range lf.Licenses {
-			typeCount[lic.Type]++
+			spdxCount[lic.Type.SPDX()]++
 		}
 	}
 
-	t.Logf("License types found: %v", typeCount)
+	t.Logf("License types found: %v", spdxCount)
 
-	// All licenses in our e2e deps should be permissive
-	if typeCount["permissive"] == 0 {
+	// All licenses in our e2e deps should be known permissive licenses
+	permissive := []string{"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC"}
+	foundPermissive := false
+	for _, p := range permissive {
+		if spdxCount[p] > 0 {
+			foundPermissive = true
+			break
+		}
+	}
+	if !foundPermissive {
 		t.Error("expected to find permissive licenses")
 	}
 
-	// Should not have any copyleft in our test deps
-	if typeCount["copyleft"] > 0 {
-		// Log which modules have copyleft licenses
-		for _, lf := range licenseFiles {
-			for _, lic := range lf.Licenses {
-				if lic.Type == "copyleft" {
-					t.Logf("Copyleft license found: %s in %s", lic.Name, lf.Module.Path)
-				}
-			}
+	// Should not have any copyleft (GPL/AGPL) in our test deps
+	copyleft := []string{"GPL-2.0", "GPL-3.0", "AGPL-3.0", "LGPL-2.1", "LGPL-3.0"}
+	for _, c := range copyleft {
+		if spdxCount[c] > 0 {
+			t.Errorf("unexpected copyleft license found: %s", c)
 		}
 	}
 }

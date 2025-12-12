@@ -5,24 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/alecthomas/kong"
 )
-
-// allowedLicenses are the licenses we know how to handle for compliance.
-var allowedLicenses = map[string]bool{
-	"MIT":          true,
-	"Apache-2.0":   true,
-	"BSD-2-Clause": true,
-	"BSD-3-Clause": true,
-	"ISC":          true,
-	"MPL-2.0":      true,
-	"Unlicense":    true,
-	"CC-BY-SA-4.0": true, // docs only
-	"Python-2.0":   true, // nested, unused
-}
 
 type CLI struct {
 	Report ReportCmd `cmd:"" help:"Generate a license report for a Go project."`
@@ -47,10 +35,11 @@ func (r *ReportCmd) Run(ctx context.Context, aggregator *Aggregator) error {
 	})
 
 	// Check for disallowed licenses
+	allowed := AllowedLicenses()
 	var disallowed []string
 	for _, lf := range licenseFiles {
 		for _, l := range lf.Licenses {
-			if !allowedLicenses[l.Name] && l.Name != "" {
+			if !allowed[l.Name] && l.Name != "" {
 				disallowed = append(disallowed, fmt.Sprintf("%s@%s: %s (%s)", lf.Module.Path, lf.Module.Version, l.Name, lf.RelPath))
 			}
 		}
@@ -116,12 +105,17 @@ func writeReport(w io.Writer, licenseFiles []LicenseFile) error {
 }
 
 func licenseNames(lf LicenseFile) string {
+	if len(lf.Licenses) == 0 {
+		// For NOTICE/COPYRIGHT files that aren't licenses, use the filename
+		base := strings.ToUpper(strings.TrimSuffix(lf.RelPath, filepath.Ext(lf.RelPath)))
+		if strings.Contains(base, "NOTICE") || strings.Contains(base, "COPYRIGHT") {
+			return "(NOTICE file)"
+		}
+		return "Unknown"
+	}
 	names := make([]string, len(lf.Licenses))
 	for i, l := range lf.Licenses {
-		names[i] = l.Name
-	}
-	if len(names) == 0 {
-		return "Unknown"
+		names[i] = l.Type.SPDX()
 	}
 	return strings.Join(names, ", ")
 }
