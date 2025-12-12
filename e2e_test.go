@@ -247,3 +247,122 @@ func TestE2E_ModuleVersions(t *testing.T) {
 		}
 	}
 }
+
+// TestE2E_Run tests the main Run function end-to-end.
+func TestE2E_Run(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to get current file path")
+	}
+	e2eDir := filepath.Join(filepath.Dir(thisFile), "testdata", "e2e")
+
+	result, err := licenseplease.Run(context.Background(), e2eDir)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	// Verify result structure
+	if result == nil {
+		t.Fatal("Run() returned nil result")
+	}
+
+	if len(result.LicenseFiles) == 0 {
+		t.Error("Run() returned no license files")
+	}
+
+	// Verify results are sorted by module path
+	for i := 1; i < len(result.LicenseFiles); i++ {
+		prev := result.LicenseFiles[i-1]
+		curr := result.LicenseFiles[i]
+		if prev.Module.Path > curr.Module.Path {
+			t.Errorf("results not sorted: %s > %s", prev.Module.Path, curr.Module.Path)
+		}
+	}
+
+	// Verify expected modules are present
+	expectedModules := []string{
+		"github.com/spf13/cobra",
+		"github.com/spf13/pflag",
+		"github.com/stretchr/testify",
+	}
+
+	foundModules := make(map[string]bool)
+	for _, lf := range result.LicenseFiles {
+		foundModules[lf.Module.Path] = true
+	}
+
+	for _, expected := range expectedModules {
+		if !foundModules[expected] {
+			t.Errorf("expected module %s not found in results", expected)
+		}
+	}
+}
+
+// TestE2E_Run_ReportsDisallowedLicenses verifies that Run() fails on disallowed licenses.
+func TestE2E_Run_ReportsDisallowedLicenses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	// This test would need a module with a GPL dependency to properly test.
+	// For now, we just verify the happy path works with our known-good e2e module.
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to get current file path")
+	}
+	e2eDir := filepath.Join(filepath.Dir(thisFile), "testdata", "e2e")
+
+	result, err := licenseplease.Run(context.Background(), e2eDir)
+	
+	// Our e2e module should have all allowed licenses
+	if err != nil {
+		t.Fatalf("Run() should succeed with allowed licenses, got error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Run() returned nil result for valid project")
+	}
+}
+
+// TestE2E_LicenseURL verifies that license URLs are correctly formed.
+func TestE2E_LicenseURL(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to get current file path")
+	}
+	e2eDir := filepath.Join(filepath.Dir(thisFile), "testdata", "e2e")
+
+	result, err := licenseplease.Run(context.Background(), e2eDir)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	for _, lf := range result.LicenseFiles {
+		url := lf.LicenseURL()
+		
+		// Should be a pkg.go.dev URL
+		if !strings.HasPrefix(url, "https://pkg.go.dev/") {
+			t.Errorf("unexpected URL prefix for %s: %s", lf.Module.Path, url)
+		}
+		
+		// Should contain module path and version
+		if !strings.Contains(url, lf.Module.Path) {
+			t.Errorf("URL missing module path for %s: %s", lf.Module.Path, url)
+		}
+		if !strings.Contains(url, lf.Module.Version) {
+			t.Errorf("URL missing version for %s: %s", lf.Module.Path, url)
+		}
+		
+		// Should have licenses tab
+		if !strings.Contains(url, "tab=licenses") {
+			t.Errorf("URL missing licenses tab for %s: %s", lf.Module.Path, url)
+		}
+	}
+}

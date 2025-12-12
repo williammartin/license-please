@@ -1,4 +1,4 @@
-package licenseplease
+package cli
 
 import (
 	"context"
@@ -6,10 +6,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/alecthomas/kong"
+	"github.com/williammartin/licenseplease"
 )
 
 type CLI struct {
@@ -20,39 +20,17 @@ type ReportCmd struct {
 	ProjectDir string `arg:"" optional:"" default:"." help:"Path to Go project directory."`
 }
 
-func (r *ReportCmd) Run(ctx context.Context, aggregator *Aggregator) error {
-	licenseFiles, err := aggregator.Aggregate(ctx, r.ProjectDir)
+func (r *ReportCmd) Run(ctx context.Context) error {
+	result, err := licenseplease.Run(ctx, r.ProjectDir)
 	if err != nil {
 		return err
 	}
 
-	// Sort by module path for consistent output
-	sort.Slice(licenseFiles, func(i, j int) bool {
-		if licenseFiles[i].Module.Path != licenseFiles[j].Module.Path {
-			return licenseFiles[i].Module.Path < licenseFiles[j].Module.Path
-		}
-		return licenseFiles[i].RelPath < licenseFiles[j].RelPath
-	})
-
-	// Check for disallowed licenses
-	allowed := AllowedLicenses()
-	var disallowed []string
-	for _, lf := range licenseFiles {
-		for _, l := range lf.Licenses {
-			if !allowed[l.Name] && l.Name != "" {
-				disallowed = append(disallowed, fmt.Sprintf("%s@%s: %s (%s)", lf.Module.Path, lf.Module.Version, l.Name, lf.RelPath))
-			}
-		}
-	}
-	if len(disallowed) > 0 {
-		return fmt.Errorf("found %d dependencies with disallowed licenses:\n  %s", len(disallowed), strings.Join(disallowed, "\n  "))
-	}
-
-	// Generate and write report to stdout
-	return writeReport(os.Stdout, licenseFiles)
+	return WriteReport(os.Stdout, result)
 }
 
-func writeReport(w io.Writer, licenseFiles []LicenseFile) error {
+// WriteReport writes the license report in markdown format to the given writer.
+func WriteReport(w io.Writer, result *licenseplease.Result) error {
 	// Header
 	fmt.Fprintln(w, "# Third-Party Licenses")
 	fmt.Fprintln(w)
@@ -65,7 +43,7 @@ func writeReport(w io.Writer, licenseFiles []LicenseFile) error {
 	fmt.Fprintln(w, "| Module | Version | License | Source |")
 	fmt.Fprintln(w, "|--------|---------|---------|--------|")
 
-	for _, lf := range licenseFiles {
+	for _, lf := range result.LicenseFiles {
 		names := licenseNames(lf)
 		url := lf.LicenseURL()
 		fmt.Fprintf(w, "| %s | %s | %s | [%s](%s) |\n",
@@ -80,7 +58,7 @@ func writeReport(w io.Writer, licenseFiles []LicenseFile) error {
 	fmt.Fprintln(w, "## License Texts")
 	fmt.Fprintln(w)
 
-	for _, lf := range licenseFiles {
+	for _, lf := range result.LicenseFiles {
 		names := licenseNames(lf)
 
 		fmt.Fprintf(w, "### %s %s\n\n", lf.Module.Path, lf.Module.Version)
@@ -104,7 +82,7 @@ func writeReport(w io.Writer, licenseFiles []LicenseFile) error {
 	return nil
 }
 
-func licenseNames(lf LicenseFile) string {
+func licenseNames(lf licenseplease.LicenseFile) string {
 	if len(lf.Licenses) == 0 {
 		// For NOTICE/COPYRIGHT files that aren't licenses, use the filename
 		base := strings.ToUpper(strings.TrimSuffix(lf.RelPath, filepath.Ext(lf.RelPath)))
@@ -120,27 +98,14 @@ func licenseNames(lf LicenseFile) string {
 	return strings.Join(names, ", ")
 }
 
-func Run(args []string) {
-	classifier, err := NewGoogleLicenseClassifier()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-
-	aggregator := &Aggregator{
-		Resolver:   &GoModResolver{},
-		Finder:     &RecursiveLicenseFinder{},
-		Classifier: classifier,
-	}
-
+func Execute() {
 	cli := &CLI{}
 	kctx := kong.Parse(cli,
 		kong.Name("license-please"),
 		kong.Description("A tool to help with Go OSS license compliance."),
 		kong.BindTo(context.Background(), (*context.Context)(nil)),
-		kong.BindTo(aggregator, (*Aggregator)(nil)),
 	)
 
-	err = kctx.Run(context.Background(), aggregator)
+	err := kctx.Run(context.Background())
 	kctx.FatalIfErrorf(err)
 }

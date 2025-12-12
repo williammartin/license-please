@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	classifier "github.com/google/licenseclassifier/v2"
@@ -362,4 +363,53 @@ func (a *Aggregator) Aggregate(ctx context.Context, projectDir string) ([]Licens
 // LicenseURL returns a URL to view the license on pkg.go.dev.
 func (lf *LicenseFile) LicenseURL() string {
 	return fmt.Sprintf("https://pkg.go.dev/%s@%s?tab=licenses", lf.Module.Path, lf.Module.Version)
+}
+
+// Result contains the output of a license scan.
+type Result struct {
+	LicenseFiles []LicenseFile
+}
+
+// Run scans a Go project for dependencies, finds their licenses, validates them
+// against the allowed list, and returns the results sorted by module path.
+func Run(ctx context.Context, projectDir string) (*Result, error) {
+	classifier, err := NewGoogleLicenseClassifier()
+	if err != nil {
+		return nil, fmt.Errorf("creating classifier: %w", err)
+	}
+
+	aggregator := &Aggregator{
+		Resolver:   &GoModResolver{},
+		Finder:     &RecursiveLicenseFinder{},
+		Classifier: classifier,
+	}
+
+	licenseFiles, err := aggregator.Aggregate(ctx, projectDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sort by module path for consistent output
+	sort.Slice(licenseFiles, func(i, j int) bool {
+		if licenseFiles[i].Module.Path != licenseFiles[j].Module.Path {
+			return licenseFiles[i].Module.Path < licenseFiles[j].Module.Path
+		}
+		return licenseFiles[i].RelPath < licenseFiles[j].RelPath
+	})
+
+	// Check for disallowed licenses
+	allowed := AllowedLicenses()
+	var disallowed []string
+	for _, lf := range licenseFiles {
+		for _, l := range lf.Licenses {
+			if !allowed[l.Name] && l.Name != "" {
+				disallowed = append(disallowed, fmt.Sprintf("%s@%s: %s (%s)", lf.Module.Path, lf.Module.Version, l.Name, lf.RelPath))
+			}
+		}
+	}
+	if len(disallowed) > 0 {
+		return nil, fmt.Errorf("found %d dependencies with disallowed licenses:\n  %s", len(disallowed), strings.Join(disallowed, "\n  "))
+	}
+
+	return &Result{LicenseFiles: licenseFiles}, nil
 }

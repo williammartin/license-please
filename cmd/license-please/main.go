@@ -1,11 +1,9 @@
 package main
 
 import (
-	"os"
-
-	"github.com/williammartin/licenseplease"
+	"github.com/williammartin/licenseplease/cli"
 )
 
 func main() {
-	licenseplease.Run(os.Args[1:])
+	cli.Execute()
 }
