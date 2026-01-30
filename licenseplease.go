@@ -271,6 +271,14 @@ func (f *RecursiveLicenseFinder) Find(ctx context.Context, module Module) ([]str
 			if d.Name() == "vendor" {
 				return filepath.SkipDir
 			}
+			// Skip assets directories (e.g., licenseclassifier's sample licenses)
+			if d.Name() == "assets" {
+				return filepath.SkipDir
+			}
+			// Skip testdata directories
+			if d.Name() == "testdata" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if licenseFilePattern.MatchString(d.Name()) {
